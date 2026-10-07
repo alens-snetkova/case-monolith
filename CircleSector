@@ -95,4 +95,206 @@ export default function CircularRevealAdaptive() {
 /**
  * CircularRevealAnimation
  * Чистый компонент, отвечающий исключительно за математику и отрисовку анимации.
- * Использует прямую манипуляцию DOM (Direct
+ * Использует прямую манипуляцию DOM (Direct DOM Manipulation) для достижения стабильных 60 FPS,
+ * полностью минуя цикл рендеринга React во время анимации.
+ */
+function CircularRevealAnimation({
+    color,
+    containerWidth,
+}: {
+    color: string
+    containerWidth: number
+}) {
+    // Адаптивный расчет размера: не меньше 120px, не больше 400px, 60% от ширины контейнера
+    const size = Math.min(Math.max(containerWidth * 0.6, 120), 400)
+    const strokeWidth = size * 0.1 // Толщина линии масштабируется пропорционально (10%)
+    const radius = (size - strokeWidth) / 2
+    const center = size / 2
+
+    // Храним ссылки на DOM-элементы секторов и векторы их направления в useRef.
+    // Это позволяет обновлять их в requestAnimationFrame без вызова setState и ререндеров.
+    const sectorRefs = React.useRef<(SVGGElement | null)[]>([])
+    const directionsRef = React.useRef<{ x: number; y: number }[]>([])
+    const animationRef = React.useRef<number>()
+    
+    // Используем ref вместо state для флага видимости, чтобы не триггерить ререндер 
+    // при скролле, но при этом иметь актуальное значение внутри замыкания animate.
+    const isVisibleRef = React.useRef(true)
+    const wrapperRef = React.useRef<HTMLDivElement>(null)
+
+    // Предварительный расчет векторов смещения для эффекта "разлета" (disassemble)
+    React.useEffect(() => {
+        directionsRef.current = Array.from({ length: TOTAL_SECTORS }, (_, i) => {
+            const angle = (i * ANGLE_PER_SECTOR - 90) * (Math.PI / 180)
+            const distance = size * 0.8 // Разлетаются на 80% размера компонента
+            return {
+                x: Math.cos(angle) * distance,
+                y: Math.sin(angle) * distance,
+            }
+        })
+    }, [size])
+
+    // Intersection Observer для паузы анимации, когда компонент не в зоне видимости.
+    // Экономит ресурсы CPU/GPU, не останавливая сам цикл requestAnimationFrame полностью, 
+    // а лишь пропуская вычисления.
+    React.useEffect(() => {
+        if (!wrapperRef.current) return
+
+        const observer = new IntersectionObserver(
+            ([entry]) => {
+                isVisibleRef.current = entry.isIntersecting
+            },
+            { threshold: 0.1 }
+        )
+
+        observer.observe(wrapperRef.current)
+        return () => observer.disconnect()
+    }, [])
+
+    // Основной цикл анимации
+    React.useEffect(() => {
+        let startTime: number | null = null
+
+        const animate = (timestamp: number) => {
+            // Если компонент не виден, пропускаем тяжелые вычисления, но поддерживаем цикл
+            if (!isVisibleRef.current) {
+                animationRef.current = requestAnimationFrame(animate)
+                return
+            }
+
+            if (!startTime) startTime = timestamp
+
+            const elapsed = timestamp - startTime
+            const cycleTime = elapsed % CYCLE_DURATION
+
+            const sectors = sectorRefs.current
+            const directions = directionsRef.current
+
+            for (let i = 0; i < TOTAL_SECTORS; i++) {
+                const el = sectors[i]
+                if (!el) continue
+
+                const direction = directions[i]
+                let opacity = 0
+                let translateX = direction.x
+                let translateY = direction.y
+
+                // ФАЗА 1: Сборка (Assembly)
+                if (cycleTime < ASSEMBLE_DURATION) {
+                    const sectorStart = i * SECTOR_TIME
+                    const sectorEnd = sectorStart + SECTOR_TIME
+
+                    if (cycleTime >= sectorEnd) {
+                        // Сектор уже полностью собран
+                        opacity = 1
+                        translateX = 0
+                        translateY = 0
+                    } else if (cycleTime >= sectorStart) {
+                        // Сектор в процессе появления (интерполяция)
+                        const progress = (cycleTime - sectorStart) / SECTOR_TIME
+                        opacity = progress
+                        translateX = direction.x * (1 - progress)
+                        translateY = direction.y * (1 - progress)
+                    }
+                } 
+                // ФАЗА 2: Пауза в собранном состоянии
+                else if (cycleTime < ASSEMBLE_DURATION + PAUSE_DURATION) {
+                    opacity = 1
+                    translateX = 0
+                    translateY = 0
+                } 
+                // ФАЗА 3: Разборка (Disassembly) в обратном порядке
+                else if (cycleTime < ASSEMBLE_DURATION + PAUSE_DURATION + DISASSEMBLE_DURATION) {
+                    const disassembleTime = cycleTime - ASSEMBLE_DURATION - PAUSE_DURATION
+                    
+                    // reverseIndex обеспечивает эффект "сворачивания" с последнего сектора к первому
+                    const reverseIndex = TOTAL_SECTORS - 1 - i
+                    const sectorStart = reverseIndex * DISASSEMBLE_SECTOR_TIME
+                    const sectorEnd = sectorStart + DISASSEMBLE_SECTOR_TIME
+
+                    if (disassembleTime >= sectorEnd) {
+                        opacity = 0
+                        translateX = direction.x
+                        translateY = direction.y
+                    } else if (disassembleTime >= sectorStart) {
+                        const progress = (disassembleTime - sectorStart) / DISASSEMBLE_SECTOR_TIME
+                        opacity = 1 - progress
+                        translateX = direction.x * progress
+                        translateY = direction.y * progress
+                    } else {
+                        // Сектор еще ждет своей очереди на разборку
+                        opacity = 1
+                        translateX = 0
+                        translateY = 0
+                    }
+                }
+
+                // ПРЯМАЯ МАНИПУЛЯЦИЯ DOM: 
+                // Обновляем стили напрямую, минуя React reconciliation. 
+                // Это ключевая оптимизация для плавности сложных анимаций.
+                el.style.opacity = String(opacity)
+                el.style.transform = `translate(${translateX}px, ${translateY}px)`
+            }
+
+            animationRef.current = requestAnimationFrame(animate)
+        }
+
+        animationRef.current = requestAnimationFrame(animate)
+
+        // Очистка: отмена кадра при размонтировании компонента
+        return () => {
+            if (animationRef.current) {
+                cancelAnimationFrame(animationRef.current)
+            }
+        }
+    }, []) // Пустой массив зависимостей: цикл инициализируется один раз
+
+    return (
+        <div
+            ref={wrapperRef}
+            style={{
+                position: "absolute",
+                top: "50%",
+                left: "50%",
+                transform: "translate(-50%, -50%)",
+                width: `${size}px`,
+                height: `${size}px`,
+            }}
+        >
+            <svg
+                width={size}
+                height={size}
+                viewBox={`0 0 ${size} ${size}`}
+                style={{ overflow: "visible" }} // Чтобы round-эффекты или тени не обрезались краями viewBox
+            >
+                {Array.from({ length: TOTAL_SECTORS }).map((_, index) => {
+                    const startAngle = index * ANGLE_PER_SECTOR
+                    const endAngle = (index + 1) * ANGLE_PER_SECTOR
+
+                    return (
+                        <g
+                            key={index}
+                            ref={(el) => {
+                                sectorRefs.current[index] = el
+                            }}
+                            style={{
+                                opacity: 0,
+                                // will-change подсказывает браузеру вынести этот элемент 
+                                // в отдельный композитный слой (GPU) для оптимизации transform и opacity
+                                willChange: "transform, opacity",
+                            }}
+                        >
+                            <path
+                                d={createArcPath(startAngle, endAngle, radius, center, center)}
+                                fill="none"
+                                stroke={color}
+                                strokeWidth={strokeWidth}
+                                strokeLinecap="butt"
+                            />
+                        </g>
+                    )
+                })}
+            </svg>
+        </div>
+    )
+}
