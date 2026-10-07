@@ -1,0 +1,276 @@
+import * as React from "react"
+import { addPropertyControls, ControlType } from "framer"
+
+// 1. Выносим неизменяемые константы за пределы компонента.
+// Это микро-оптимизация: мы не пересоздаем эти значения при каждом ререндере, 
+// а математика остается предсказуемой и читаемой.
+const TOTAL_SECTORS = 8
+const ANGLE_PER_SECTOR = 360 / TOTAL_SECTORS
+const OUTER_RADIUS = 90
+const INNER_RADIUS = 70
+const CENTER = 100
+const LARGE_ARC_FLAG = ANGLE_PER_SECTOR > 180 ? 1 : 0
+
+// Чистая функция для генерации SVG-пути (атрибут 'd').
+// Важно: отнимаем 90 градусов, чтобы начать отсчет с "12 часов" (верхняя точка), 
+// а не со стандартных для SVG "3 часов".
+const createArcPath = (
+    startAngle: number,
+    endAngle: number,
+    r: number,
+    cx: number,
+    cy: number
+) => {
+    const startRad = ((startAngle - 90) * Math.PI) / 180
+    const endRad = ((endAngle - 90) * Math.PI) / 180
+    const x1 = cx + r * Math.cos(startRad)
+    const y1 = cy + r * Math.sin(startRad)
+    const x2 = cx + r * Math.cos(endRad)
+    const y2 = cy + r * Math.sin(endRad)
+    return `M ${x1} ${y1} A ${r} ${r} 0 ${LARGE_ARC_FLAG} 1 ${x2} ${y2}`
+}
+
+export function CircularRevealRings(props: {
+    color: string
+    strokeWidth: number
+    duration: number
+    delay: number
+}) {
+    const { color, strokeWidth, duration, delay } = props
+    const containerRef = React.useRef<HTMLDivElement>(null)
+
+    const [currentSector, setCurrentSector] = React.useState(0)
+    const [sectorProgress, setSectorProgress] = React.useState(0)
+    const [isAnimating, setIsAnimating] = React.useState(false)
+
+    // 2. ВАЖНАЯ ОПТИМИЗАЦИЯ: Мемоизация геометрии.
+    // Вычисление Math.sin и Math.cos — "тяжелая" операция. 
+    // Благодаря useMemo, эта математика выполняется ТОЛЬКО ОДИН РАЗ при монтировании компонента.
+    // Без этого браузер пересчитывал бы координаты всех 8 секторов при каждом тике анимации, что убило бы FPS.
+    const geometry = React.useMemo(() => {
+        const arcLengthOuter = (2 * Math.PI * OUTER_RADIUS) / TOTAL_SECTORS
+        const arcLengthInner = (2 * Math.PI * INNER_RADIUS) / TOTAL_SECTORS
+
+        return Array.from({ length: TOTAL_SECTORS }).map((_, index) => {
+            const startAngle = index * ANGLE_PER_SECTOR
+            const endAngle = (index + 1) * ANGLE_PER_SECTOR
+            return {
+                outerPath: createArcPath(startAngle, endAngle, OUTER_RADIUS, CENTER, CENTER),
+                innerPath: createArcPath(startAngle, endAngle, INNER_RADIUS, CENTER, CENTER),
+                arcLengthOuter,
+                arcLengthInner,
+            }
+        })
+    }, []) // Пустой массив зависимостей гарантирует однократный расчет
+
+    // 3. Отслеживание появления в зоне видимости (Scroll Trigger)
+    React.useEffect(() => {
+        if (!containerRef.current) return
+
+        const observer = new IntersectionObserver(
+            ([entry]) => {
+                // Запускаем анимацию, когда 30% компонента появляется на экране
+                setIsAnimating(entry.isIntersecting)
+            },
+            { threshold: 0.3 }
+        )
+
+        observer.observe(containerRef.current)
+        return () => observer.disconnect() // Очистка при удалении со страницы
+    }, [])
+
+    // 4. Двигатель анимации на requestAnimationFrame
+    React.useEffect(() => {
+        if (!isAnimating) return
+
+        let animationFrame: number
+        let startTime: number | null = null
+        
+        const initialDelay = delay * 1000
+        const assembleDuration = duration * 1000
+        const pauseDuration = 1000
+        const resetPauseDuration = 1000
+        const cycleDuration = assembleDuration + pauseDuration + resetPauseDuration
+        const sectorTime = assembleDuration / TOTAL_SECTORS
+
+        const animate = (timestamp: number) => {
+            if (!startTime) startTime = timestamp
+
+            const elapsed = timestamp - startTime - initialDelay
+
+            // Фаза 1: Начальная задержка
+            if (elapsed < 0) {
+                setCurrentSector(0)
+                setSectorProgress(0)
+                animationFrame = requestAnimationFrame(animate)
+                return
+            }
+
+            const cycleTime = elapsed % cycleDuration
+
+            // Фаза 2: Сборка (посекторное появление)
+            if (cycleTime < assembleDuration) {
+                // Math.min гарантирует, что индекс никогда не выйдет за пределы TOTAL_SECTORS - 1
+                const currentSectorIndex = Math.min(
+                    Math.floor(cycleTime / sectorTime),
+                    TOTAL_SECTORS - 1
+                )
+                const sectorElapsed = cycleTime - currentSectorIndex * sectorTime
+                const progress = Math.min(sectorElapsed / sectorTime, 1)
+
+                setCurrentSector(currentSectorIndex)
+                setSectorProgress(progress)
+            } 
+            // Фаза 3: Пауза в собранном состоянии
+            else if (cycleTime < assembleDuration + pauseDuration) {
+                setCurrentSector(TOTAL_SECTORS - 1)
+                setSectorProgress(1)
+            } 
+            // Фаза 4: Сброс для следующего цикла
+            else {
+                setCurrentSector(0)
+                setSectorProgress(0)
+            }
+
+            animationFrame = requestAnimationFrame(animate)
+        }
+
+        animationFrame = requestAnimationFrame(animate)
+
+        // Очистка цикла анимации при размонтировании или изменении пропсов
+        return () => {
+            if (animationFrame) cancelAnimationFrame(animationFrame)
+        }
+    }, [isAnimating, duration, delay])
+
+    return (
+        <>
+            <style>{`
+                .circular-reveal-container {
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                    width: 100%;
+                    height: 100%;
+                    min-height: 200px;
+                }
+
+                .circular-reveal {
+                    display: inline-block;
+                    line-height: 0;
+                    width: 100%;
+                    max-width: 300px;
+                    aspect-ratio: 1 / 1;
+                }
+                
+                .circular-reveal svg {
+                    width: 100%;
+                    height: 100%;
+                    overflow: visible; /* Чтобы линии не обрезались краями viewBox */
+                }
+                
+                .ring-path {
+                    fill: none;
+                    stroke-linecap: butt;
+                    transition: opacity 0.1s ease;
+                    /* Подсказка браузеру: вынести анимацию прозрачности и штриховки в отдельный слой GPU */
+                    will-change: opacity, stroke-dashoffset;
+                }
+
+                /* Адаптивность: масштабирование без потери пропорций */
+                @media (max-width: 1200px) { .circular-reveal { max-width: 240px; } }
+                @media (max-width: 800px) { .circular-reveal { max-width: 180px; } }
+                @media (max-width: 400px) { 
+                    .circular-reveal { max-width: 140px; }
+                    .circular-reveal-container { min-height: 150px; }
+                }
+            `}</style>
+
+            <div className="circular-reveal-container" ref={containerRef}>
+                <div className="circular-reveal">
+                    <svg viewBox="0 0 200 200" preserveAspectRatio="xMidYMid meet">
+                        {geometry.map((geo, index) => {
+                            let opacity = 0
+                            let strokeDashoffsetOuter = geo.arcLengthOuter
+                            let strokeDashoffsetInner = geo.arcLengthInner
+
+                            // Логика отрисовки: 
+                            // 1. Сектор уже прошел -> полностью видим (offset = 0)
+                            // 2. Сектор рисуется сейчас -> прогресс от 0 до 1
+                            // 3. Сектор еще не начался -> невидим (opacity = 0)
+                            if (index < currentSector) {
+                                opacity = 1
+                                strokeDashoffsetOuter = 0
+                                strokeDashoffsetInner = 0
+                            } else if (index === currentSector) {
+                                opacity = 1
+                                strokeDashoffsetOuter = geo.arcLengthOuter * (1 - sectorProgress)
+                                strokeDashoffsetInner = geo.arcLengthInner * (1 - sectorProgress)
+                            }
+
+                            return (
+                                // React.Fragment позволяет вернуть два элемента (кольца) 
+                                // без создания лишних div-оберток в DOM-дереве.
+                                <React.Fragment key={index}>
+                                    {/* Внешнее кольцо */}
+                                    <path
+                                        d={geo.outerPath}
+                                        className="ring-path"
+                                        stroke={color}
+                                        strokeWidth={strokeWidth}
+                                        strokeDasharray={geo.arcLengthOuter}
+                                        strokeDashoffset={strokeDashoffsetOuter}
+                                        opacity={opacity}
+                                    />
+                                    {/* Внутреннее кольцо */}
+                                    <path
+                                        d={geo.innerPath}
+                                        className="ring-path"
+                                        stroke={color}
+                                        strokeWidth={strokeWidth}
+                                        strokeDasharray={geo.arcLengthInner}
+                                        strokeDashoffset={strokeDashoffsetInner}
+                                        opacity={opacity}
+                                    />
+                                </React.Fragment>
+                            )
+                        })}
+                    </svg>
+                </div>
+            </div>
+        </>
+    )
+}
+
+// Настройка панели свойств в Framer
+addPropertyControls(CircularRevealRings, {
+    color: {
+        type: ControlType.Color,
+        defaultValue: "#0A0A0A",
+        title: "Color",
+    },
+    strokeWidth: {
+        type: ControlType.Number,
+        defaultValue: 1, 
+        min: 0.5, // Разрешаем полуторные значения для ювелирной настройки
+        max: 4,   // Ограничиваем максимум, чтобы защитить дизайн от случайных "жирных" линий
+        step: 0.5,
+        title: "Line Width (px)",
+    },
+    duration: {
+        type: ControlType.Number,
+        defaultValue: 1.5,
+        min: 0.5,
+        max: 5,
+        step: 0.1,
+        title: "Duration (sec)",
+    },
+    delay: {
+        type: ControlType.Number,
+        defaultValue: 0.5,
+        min: 0,
+        max: 5,
+        step: 0.1,
+        title: "Initial Delay (sec)",
+    },
+})
