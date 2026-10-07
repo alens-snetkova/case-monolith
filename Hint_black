@@ -1,0 +1,122 @@
+import * as React from "react"
+
+/**
+ * Hint_black
+ * Темная версия подсказки "SCROLL". 
+ * Вынесена в отдельный компонент для чистоты кода и возможности независимой стилизации 
+ * (например, если в будущем захочется добавить разную анимацию для светлых и темных секций).
+ */
+export default function Hint_black() {
+    const [isVisible, setIsVisible] = React.useState(false)
+    
+    // Флаг-предохранитель: гарантирует, что анимация не будет дергаться и перезапускаться 
+    // каждые 3 секунды, пока пользователь просто смотрит на экран.
+    const [hasAnimated, setHasAnimated] = React.useState(false)
+    
+    const containerRef = React.useRef<HTMLDivElement>(null)
+
+    // Храним ID таймера именно в useRef. 
+    // Если бы мы положили его в useState, каждый тик таймера вызывал бы лишний ререндер. 
+    // Ref дает нам "тихое" хранилище, доступное для очистки при удалении компонента.
+    const timerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null)
+
+    React.useEffect(() => {
+        if (!containerRef.current) return
+
+        // Следим за элементом. Деструктуризация [entry] вместо forEach — это микро-оптимизация, 
+        // так как мы знаем, что наблюдаем только за одним конкретным DOM-узлом.
+        const observer = new IntersectionObserver(
+            ([entry]) => {
+                if (entry.isIntersecting && !hasAnimated) {
+                    // 1. Пользователь доскроллил до нужного места (50% элемента видно) — показываем подсказку.
+                    setIsVisible(true)
+
+                    // 2. Даем 3 секунды на прочтение, затем прячем и ставим метку "уже было".
+                    timerRef.current = setTimeout(() => {
+                        setIsVisible(false)
+                        setHasAnimated(true)
+                    }, 3000)
+                } else if (!entry.isIntersecting && hasAnimated) {
+                    // 3. Умный UX-паттерн: если пользователь ушел со страницы, а потом вернулся, 
+                    // мы сбрасываем флаг. Подсказка сможет появиться снова. Это лучше, 
+                    // чем заблокировать её навсегда после первого показа.
+                    setHasAnimated(false)
+                }
+            },
+            { threshold: 0.5 } // Срабатывает, когда половина элемента появилась на экране
+        )
+
+        observer.observe(containerRef.current)
+
+        // Функция очистки (Cleanup). Это правило хорошего тона в React:
+        // если пользователь перейдет на другую страницу до того, как сработает таймер,
+        // clearTimeout предотвратит попытку обновить стейт несуществующего компонента 
+        // (и спасет консоль от страшной красной ошибки "memory leak").
+        return () => {
+            if (timerRef.current) clearTimeout(timerRef.current)
+            observer.disconnect()
+        }
+    }, [hasAnimated])
+
+    return (
+        <>
+            <style>{`
+                .scroll-hint-black {
+                    position: absolute;
+                    top: 40px;
+                    left: 50%;
+                    transform: translateX(-50%);
+                    z-index: 100;
+                    display: flex;
+                    flex-direction: row;
+                    align-items: center;
+                    gap: 4px;
+                    opacity: 0;
+                    transition: opacity 0.3s ease;
+                    
+                    /* Критически важно для UI-подсказок: элемент становится "прозрачным" для кликов.
+                       Пользователь сможет нажать на кнопку или ссылку, которая визуально находится под этой подсказкой. */
+                    pointer-events: none;
+                    
+                    /* Сообщаем браузеру: "Этот элемент скоро изменит прозрачность". 
+                       Браузер заранее вынесет его в отдельный композитный слой (GPU), 
+                       чтобы анимация была идеально плавной, без рывков. */
+                    will-change: opacity;
+                }
+
+                .scroll-hint-black.visible {
+                    opacity: 1;
+                }
+
+                .scroll-hint-black-text {
+                    font-family: 'Inter', sans-serif;
+                    font-weight: 200;
+                    font-size: 11px;
+                    letter-spacing: 0.15em;
+                    color: #000000; /* Темная тема */
+                    text-transform: uppercase;
+                }
+
+                .scroll-hint-black svg {
+                    width: 14px;
+                    height: 14px;
+                    stroke: #000000; /* Темная тема */
+                    stroke-width: 1.5;
+                    fill: none;
+                    stroke-linecap: round;
+                    stroke-linejoin: round;
+                }
+            `}</style>
+
+            <div
+                ref={containerRef}
+                className={`scroll-hint-black ${isVisible ? "visible" : ""}`}
+            >
+                <span className="scroll-hint-black-text">SCROLL</span>
+                <svg viewBox="0 0 24 24">
+                    <path d="M12 5V19M5 12l7 7 7-7" />
+                </svg>
+            </div>
+        </>
+    )
+}
