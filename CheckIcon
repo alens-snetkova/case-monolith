@@ -1,0 +1,150 @@
+import * as React from "react"
+
+export default function CheckIconAdaptive() {
+    const containerRef = React.useRef<HTMLDivElement>(null)
+    const [containerSize, setContainerSize] = React.useState(32)
+    const [isVisible, setIsVisible] = React.useState(false)
+
+  
+    React.useEffect(() => {
+        if (!containerRef.current) return
+
+        // Начальное измерение
+        setContainerSize(Math.round(containerRef.current.offsetWidth) || 32)
+
+        const observer = new ResizeObserver((entries) => {
+            for (const entry of entries) {
+                // Math.round предотвращает лишние ререндеры из-за дробных пикселей
+                const width = Math.round(entry.contentRect.width)
+                if (width > 0) {
+                    setContainerSize((prev) => (width !== prev ? width : prev))
+                }
+            }
+        })
+
+        observer.observe(containerRef.current)
+        return () => observer.disconnect()
+    }, [])
+
+    // таймер
+    React.useEffect(() => {
+        if (!containerRef.current) return
+
+        let timer: ReturnType<typeof setTimeout>
+
+        const observer = new IntersectionObserver(
+            (entries) => {
+                const entry = entries[0]
+                if (entry.isIntersecting) {
+                    timer = setTimeout(() => setIsVisible(true), 500)
+                } else {
+                    clearTimeout(timer)
+                    setIsVisible(false)
+                }
+            },
+            { threshold: 0.5 }
+        )
+
+        observer.observe(containerRef.current)
+        return () => {
+            clearTimeout(timer)
+            observer.disconnect()
+        }
+    }, [])
+
+    return (
+        <div
+            ref={containerRef}
+            style={{
+                position: "relative",
+                width: "100%",
+                height: "100%",
+                minHeight: "24px",
+            }}
+        >
+            <CheckIconAnimation size={containerSize} isVisible={isVisible} />
+        </div>
+    )
+}
+
+// фиксированный viewBox
+function CheckIconAnimation({
+    size,
+    isVisible,
+}: {
+    size: number
+    isVisible: boolean
+}) {
+    // Используем viewBox="0 0 100 100". Это избавляет от пересчета координат при каждом изменении размера.
+    // Браузер сам масштабирует SVG
+    const radius = 40
+    const circumference = 2 * Math.PI * radius // ~251.33
+    const checkLength = 45 // Точная длина пути M 35 50 L 45 60 L 65 40 (~42.4) + запас для round caps
+
+    return (
+        <>
+            <style>{`
+                .check-circle {
+                    transition: stroke-dashoffset 0.6s ease, fill 0.3s ease 0.4s;
+                }
+                .check-mark {
+                    transition: 
+                        stroke-dashoffset 0.4s ease 0.6s, 
+                        opacity 0.3s ease 0.6s, 
+                        transform 0.4s cubic-bezier(0.16, 1, 0.3, 1) 0.6s;
+                }
+            `}</style>
+
+            <div
+                style={{
+                    position: "absolute",
+                    top: "50%",
+                    left: "50%",
+                    transform: "translate(-50%, -50%)",
+                    width: `${size}px`,
+                    height: `${size}px`,
+                }}
+            >
+                <svg
+                    viewBox="0 0 100 100"
+                    style={{
+                        width: "100%",
+                        height: "100%",
+                        overflow: "visible",
+                    }}
+                >
+                    {/* Круг */}
+                    <circle
+                        cx="50"
+                        cy="50"
+                        r={radius}
+                        fill={isVisible ? "#0A0A0A" : "transparent"}
+                        stroke="#0A0A0A"
+                        strokeWidth="10" /* 10% от 100 */
+                        strokeDasharray={circumference}
+                        strokeDashoffset={isVisible ? 0 : circumference}
+                        className="check-circle"
+                    />
+
+                    {/* Галочка */}
+                    <path
+                        d="M 35 50 L 45 60 L 65 40"
+                        fill="none"
+                        stroke="#FFFFFF"
+                        strokeWidth="8" /* 8% от 100 */
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeDasharray={checkLength}
+                        strokeDashoffset={isVisible ? 0 : checkLength}
+                        style={{
+                            opacity: isVisible ? 1 : 0,
+                            transform: isVisible ? "scale(1)" : "scale(0.3)",
+                            transformOrigin: "center",
+                        }}
+                        className="check-mark"
+                    />
+                </svg>
+            </div>
+        </>
+    )
+}
