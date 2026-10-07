@@ -1,0 +1,135 @@
+import * as React from "react"
+
+/**
+ * Preloader
+ * Компонент экрана загрузки с анимированным прогресс-баром и эффектом "шторки".
+ * Имитирует процесс загрузки (через случайные интервалы), затем плавно уезжает вниз,
+ * освобождая интерфейс для взаимодействия.
+ */
+export default function Preloader() {
+    const [progress, setProgress] = React.useState(0)
+    const [isCollapsing, setIsCollapsing] = React.useState(false)
+    const [isVisible, setIsVisible] = React.useState(true)
+
+    // Имитация процесса загрузки с нелинейным прогрессом
+    React.useEffect(() => {
+        let currentProgress = 0
+
+        const interval = setInterval(() => {
+            // Случайный прирост от 5% до 20% создает эффект "живой" загрузки
+            currentProgress += Math.random() * 15 + 5
+
+            if (currentProgress >= 100) {
+                currentProgress = 100
+                setProgress(100)
+                clearInterval(interval)
+
+                // Двухэтапная анимация завершения:
+                // 1. Пауза 400ms — пользователь видит "100%"
+                // 2. Запуск анимации шторки (800ms)
+                // 3. Полное удаление из DOM после анимации
+                setTimeout(() => {
+                    setIsCollapsing(true)
+                    setTimeout(() => setIsVisible(false), 800)
+                }, 400)
+            } else {
+                setProgress(currentProgress)
+            }
+        }, 100) // Обновление каждые 100ms = 10 FPS для счетчика (достаточно для визуального восприятия)
+
+        // Очистка interval при размонтировании (предотвращение утечек памяти)
+        return () => clearInterval(interval)
+    }, [])
+
+    // Полное удаление компонента из DOM после завершения анимации
+    // Это освобождает память и убирает лишний слой из дерева рендеринга
+    if (!isVisible) return null
+
+    return (
+        <>
+            <style>{`
+                .preloader-container {
+                    position: fixed;
+                    inset: 0; /* Современная замена top:0; left:0; right:0; bottom:0 — короче и чище */
+                    background-color: #ffffff;
+                    display: flex;
+                    flex-direction: column;
+                    align-items: center;
+                    justify-content: center;
+                    z-index: 99999; /* Максимальный приоритет поверх всего контента */
+                    
+                    /* Плавное падение шторки вниз */
+                    transition: transform 0.8s cubic-bezier(0.7, 0, 0.3, 1);
+                    will-change: transform; /* Подсказка браузеру: вынести в GPU-слой для плавности */
+                    pointer-events: auto; /* Блокирует клики по контенту под прелоадером */
+                }
+
+                .preloader-container.collapsing {
+                    transform: translateY(100%); /* Сдвиг на 100% высоты = полный уход за нижний край экрана */
+                    pointer-events: none; /* Пропускает клики сквозь уезжающий блок (пользователь может взаимодействовать с сайтом) */
+                }
+
+                .preloader-counter {
+                    font-family: 'Unbounded', sans-serif;
+                    font-weight: 200;
+                    letter-spacing: 0.04em;
+                    line-height: 1em;
+                    color: #000000;
+                    margin-bottom: 20px;
+                    white-space: nowrap; /* Предотвращает перенос "[ 100.0% ]" на две строки */
+                    
+                    /* Mobile-first: базовый размер для самых маленьких экранов */
+                    font-size: 18px;
+                }
+
+                .preloader-bar-container {
+                    width: 65%;
+                    max-width: 1200px; /* Ограничение ширины на больших экранах */
+                    height: 1px;
+                    background-color: #e0e0e0;
+                    position: relative;
+                    overflow: hidden; /* Обрезает прогресс-бар, если он выйдет за границы */
+                }
+
+                .preloader-bar {
+                    height: 100%;
+                    background-color: #000000;
+                    transition: width 0.1s linear;
+                }
+
+                /* 
+                 * Mobile-first адаптивность (нарастающая, без пересечений).
+                 * Используем min-width вместо max-width — это современный подход,
+                 * который сначала стилизует под мобильные, потом расширяет для больших экранов.
+                 */
+                @media (min-width: 390px) {
+                    .preloader-counter { font-size: 20px; }
+                }
+                @media (min-width: 810px) {
+                    .preloader-counter { font-size: 24px; }
+                }
+                @media (min-width: 1200px) {
+                    .preloader-counter { font-size: 28px; }
+                }
+                @media (min-width: 1920px) {
+                    .preloader-counter { font-size: 32px; }
+                }
+            `}</style>
+
+            <div
+                className={`preloader-container ${isCollapsing ? "collapsing" : ""}`}
+            >
+                <div className="preloader-counter">
+                    {/* toFixed(1) показывает один знак после запятой: "45.3%" вместо "45.32847%" */}
+                    [ {progress.toFixed(1)}% ]
+                </div>
+                <div className="preloader-bar-container">
+                    <div
+                        className="preloader-bar"
+                        style={{ width: `${progress}%` }}
+                    />
+                </div>
+            </div>
+        </>
+    )
+}
