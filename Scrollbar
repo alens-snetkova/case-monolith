@@ -1,17 +1,29 @@
 import * as React from "react"
 import { addPropertyControls, ControlType } from "framer"
 
-export function CustomScrollbar(props) {
+/**
+ * CustomScrollbar
+ * Кастомный вертикальный индикатор прокрутки с плавной анимацией (lerp) 
+ * и поддержкой drag-and-drop (мышь и тач).
+ * Разработан как Code Component для Framer.
+ */
+export function CustomScrollbar(props: any) {
     const { lineColor, trackColor, lineWidth } = props
+    
+    // Ссылки на DOM-элементы для прямой манипуляции стилями (минуя ререндеры React)
     const trackRef = React.useRef<HTMLDivElement>(null)
     const progressRef = React.useRef<HTMLDivElement>(null)
+    
     const [isVisible, setIsVisible] = React.useState(false)
     const [isDragging, setIsDragging] = React.useState(false)
+    
+    // Используем useRef для координат драга, чтобы избежать проблем с замыканиями (stale closures) 
+    // внутри обработчиков событий window и не вызывать лишние ререндеры.
     const dragStartY = React.useRef(0)
     const dragStartScroll = React.useRef(0)
     const animationRef = React.useRef<number>()
 
-    // Показ/скрытие скроллбара
+    // 1. Логика появления/скрытия скроллбара
     React.useEffect(() => {
         const homeSection = document.querySelector("#home")
 
@@ -20,27 +32,31 @@ export function CustomScrollbar(props) {
                 setIsVisible(true)
                 return
             }
+            // Показываем скроллбар, когда прокрутили ниже первого экрана (#home) минус 100px
             const homeBottom = homeSection.offsetTop + homeSection.offsetHeight
             setIsVisible(window.scrollY > homeBottom - 100)
         }
 
         checkVisibility()
+        // ВАЖНО: { passive: true } сообщает браузеру, что мы не будем вызывать e.preventDefault(),
+        // что позволяет выполнять скролл в основном потоке без задержек (оптимизация производительности).
         window.addEventListener("scroll", checkVisibility, { passive: true })
         return () => window.removeEventListener("scroll", checkVisibility)
     }, [])
 
-    // Анимация прогресса
+    // 2. Плавная анимация прогресса (Linear Interpolation / Lerp)
     React.useEffect(() => {
         let currentScroll = 0
-        const ease = 0.1
+        const ease = 0.1 // Коэффициент плавности (чем меньше, тем более "вязкой" будет анимация)
 
         const animate = () => {
+            // Если пользователь не тащит ползунок вручную, применяем плавное следование за скроллом
             if (!isDragging && progressRef.current) {
                 const scrollTop = window.scrollY
-                const docHeight =
-                    document.documentElement.scrollHeight - window.innerHeight
-                const targetScroll = scrollTop / docHeight
+                const docHeight = document.documentElement.scrollHeight - window.innerHeight
+                const targetScroll = docHeight > 0 ? scrollTop / docHeight : 0
 
+                // Формула Lerp: текущее значение сдвигается к целевому на долю (ease) каждый кадр
                 currentScroll += (targetScroll - currentScroll) * ease
                 progressRef.current.style.transform = `scaleY(${currentScroll})`
             }
@@ -49,31 +65,32 @@ export function CustomScrollbar(props) {
         }
 
         animationRef.current = requestAnimationFrame(animate)
+        
+        // Очистка цикла анимации при размонтировании
         return () => {
             if (animationRef.current) cancelAnimationFrame(animationRef.current)
         }
     }, [isDragging])
 
-    // Обновление прогресса при скролле
+    // 3. Мгновенное обновление прогресса (резервный/синхронный метод, если нужен вне цикла анимации)
     const updateProgress = React.useCallback(() => {
         if (progressRef.current && !isDragging) {
             const scrollTop = window.scrollY
-            const docHeight =
-                document.documentElement.scrollHeight - window.innerHeight
-            const scrollPercent = scrollTop / docHeight
+            const docHeight = document.documentElement.scrollHeight - window.innerHeight
+            const scrollPercent = docHeight > 0 ? scrollTop / docHeight : 0
             progressRef.current.style.transform = `scaleY(${scrollPercent})`
         }
     }, [isDragging])
 
-    // Клик по треку
+    // 4. Обработка клика по треку (мгновенный переход к секции)
     const handleTrackClick = React.useCallback(
         (e: React.MouseEvent) => {
             if (isDragging || !trackRef.current) return
 
             const rect = trackRef.current.getBoundingClientRect()
+            // Вычисляем процент высоты, на который кликнули (от 0.0 до 1.0)
             const clickPosition = (e.clientY - rect.top) / rect.height
-            const docHeight =
-                document.documentElement.scrollHeight - window.innerHeight
+            const docHeight = document.documentElement.scrollHeight - window.innerHeight
 
             window.scrollTo({
                 top: clickPosition * docHeight,
@@ -83,7 +100,7 @@ export function CustomScrollbar(props) {
         [isDragging]
     )
 
-    // Drag логика (объединена для мыши и тача)
+    // 5. Логика Drag-and-Drop (универсальная для мыши и тача)
     const startDrag = React.useCallback((clientY: number) => {
         setIsDragging(true)
         dragStartY.current = clientY
@@ -95,16 +112,19 @@ export function CustomScrollbar(props) {
 
         const rect = trackRef.current.getBoundingClientRect()
         const deltaY = clientY - dragStartY.current
+        
+        // Преобразуем смещение мыши в пикселях в смещение скролла документа
         const trackHeight = rect.height
-        const docHeight =
-            document.documentElement.scrollHeight - window.innerHeight
+        const docHeight = document.documentElement.scrollHeight - window.innerHeight
         const scrollDelta = (deltaY / trackHeight) * docHeight
         const newScroll = dragStartScroll.current + scrollDelta
 
+        // Мгновенный скролл без плавности (для точного контроля пользователем)
         window.scrollTo(0, newScroll)
 
+        // Мгновенное обновление визуального ползунка
         if (progressRef.current) {
-            const scrollPercent = newScroll / docHeight
+            const scrollPercent = docHeight > 0 ? newScroll / docHeight : 0
             progressRef.current.style.transform = `scaleY(${scrollPercent})`
         }
     }, [])
@@ -113,10 +133,10 @@ export function CustomScrollbar(props) {
         setIsDragging(false)
     }, [])
 
-    // Mouse events
+    // 6. Привязка событий Мыши
     const handleMouseDown = React.useCallback(
         (e: React.MouseEvent) => {
-            e.preventDefault()
+            e.preventDefault() // Предотвращаем выделение текста при начале перетаскивания
             startDrag(e.clientY)
         },
         [startDrag]
@@ -125,6 +145,8 @@ export function CustomScrollbar(props) {
     React.useEffect(() => {
         if (!isDragging) return
 
+        // ВАЖНО: События вешаются на window, а не на элемент. 
+        // Это позволяет не терять захват (drag), если курсор мыши случайно вышел за пределы узкого трека.
         const handleMouseMove = (e: MouseEvent) => moveDrag(e.clientY)
         const handleMouseUp = () => endDrag()
 
@@ -137,7 +159,7 @@ export function CustomScrollbar(props) {
         }
     }, [isDragging, moveDrag, endDrag])
 
-    // Touch events
+    // 7. Привязка событий Touch (для мобильных устройств)
     const handleTouchStart = React.useCallback(
         (e: React.TouchEvent) => {
             startDrag(e.touches[0].clientY)
@@ -149,14 +171,13 @@ export function CustomScrollbar(props) {
         if (!isDragging) return
 
         const handleTouchMove = (e: TouchEvent) => {
-            e.preventDefault()
+            e.preventDefault() // Блокируем нативный скролл страницы во время перетаскивания ползунка
             moveDrag(e.touches[0].clientY)
         }
         const handleTouchEnd = () => endDrag()
 
-        window.addEventListener("touchmove", handleTouchMove, {
-            passive: false,
-        })
+        // passive: false обязателен, чтобы работало e.preventDefault() внутри touchmove
+        window.addEventListener("touchmove", handleTouchMove, { passive: false })
         window.addEventListener("touchend", handleTouchEnd)
 
         return () => {
@@ -173,7 +194,7 @@ export function CustomScrollbar(props) {
                     right: 10px;
                     top: 50%;
                     transform: translateY(-50%);
-                    width: 24px;
+                    width: 24px; /* Зона клика шире визуальной линии для удобства */
                     height: 60vh;
                     z-index: 9999;
                     cursor: pointer;
@@ -197,6 +218,7 @@ export function CustomScrollbar(props) {
                     transform-origin: center;
                 }
 
+                /* Микро-взаимодействие: расширение трека при наведении */
                 .custom-scrollbar-wrapper:hover .custom-scrollbar-track {
                     transform: scaleX(2.5);
                 }
@@ -205,21 +227,20 @@ export function CustomScrollbar(props) {
                     width: 100%;
                     height: 100%;
                     background-color: ${lineColor || "#0A0A0A"};
+                    /* КРИТИЧЕСКИ ВАЖНО: scaleY растет от top к bottom только при transform-origin: top */
                     transform-origin: top;
                     transform: scaleY(0);
-                    will-change: transform;
+                    will-change: transform; /* Подсказка браузеру для GPU-ускорения анимации */
                     position: relative;
-                    pointer-events: none;
+                    pointer-events: none; /* Чтобы клики проходили сквозь прогресс-бар к треку */
                 }
 
-                /* Планшет (810px — 1600px) */
+                /* Адаптивность: Планшет */
                 @media (max-width: 1600px) {
-                    .custom-scrollbar-wrapper {
-                        right: 5px;
-                    }
+                    .custom-scrollbar-wrapper { right: 5px; }
                 }
 
-                /* Мобильные (<809px) */
+                /* Адаптивность: Мобильные устройства */
                 @media (max-width: 809px) {
                     .custom-scrollbar-wrapper {
                         right: 0px;
@@ -246,6 +267,7 @@ export function CustomScrollbar(props) {
     )
 }
 
+// Регистрация контролов в панели свойств Framer
 addPropertyControls(CustomScrollbar, {
     lineColor: {
         type: ControlType.Color,
