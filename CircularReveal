@@ -1,0 +1,243 @@
+import * as React from "react"
+import { addPropertyControls, ControlType } from "framer"
+
+/**
+ * CircularReveal
+ * Кастомный компонент для Framer, реализующий анимацию кругового раскрытия (посекторная отрисовка).
+ * Анимация запускается при появлении компонента в области видимости (scroll trigger).
+ */
+export function CircularReveal(props: any) {
+    const { color, strokeWidth, duration, delay } = props
+
+    // Ссылка на DOM-элемент для отслеживания видимости через Intersection Observer
+    const containerRef = React.useRef<HTMLDivElement>(null)
+    
+    // Состояния для управления пошаговой анимацией
+    const [currentSector, setCurrentSector] = React.useState(0) // Индекс текущего отрисовываемого сектора (0-7)
+    const [sectorProgress, setSectorProgress] = React.useState(0) // Прогресс отрисовки текущего сектора (0.0 - 1.0)
+    const [isAnimating, setIsAnimating] = React.useState(false) // Флаг-триггер начала анимации
+
+    const totalSectors = 8
+    const anglePerSector = 360 / totalSectors
+
+    /**
+     * Вспомогательная функция для генерации SVG-пути (атрибут 'd')
+     * Преобразует градусы в радианы и вычисляет координаты начальной и конечной точек дуги.
+     */
+    const createArcPath = (startAngle: number, endAngle: number, r: number, cx: number, cy: number) => {
+        const startRad = ((startAngle - 90) * Math.PI) / 180
+        const endRad = ((endAngle - 90) * Math.PI) / 180
+
+        const x1 = cx + r * Math.cos(startRad)
+        const y1 = cy + r * Math.sin(startRad)
+        const x2 = cx + r * Math.cos(endRad)
+        const y2 = cy + r * Math.sin(endRad)
+
+        const largeArcFlag = anglePerSector > 180 ? 1 : 0
+
+        return `M ${x1} ${y1} A ${r} ${r} 0 ${largeArcFlag} 1 ${x2} ${y2}`
+    }
+
+    // 1. Отслеживание появления компонента во viewport (Scroll Trigger)
+    React.useEffect(() => {
+        if (!containerRef.current) return
+
+        const observer = new IntersectionObserver(
+            ([entry]) => {
+                // Запускаем анимацию, когда 30% компонента появляется на экране
+                setIsAnimating(entry.isIntersecting)
+            },
+            { threshold: 0.3 }
+        )
+
+        observer.observe(containerRef.current)
+        
+        // Очистка observer при размонтировании компонента (предотвращение утечек памяти)
+        return () => observer.disconnect()
+    }, [])
+
+    // 2. Основной цикл анимации через requestAnimationFrame (обеспечивает плавные 60fps)
+    React.useEffect(() => {
+        if (!isAnimating) return
+
+        let animationFrame: number
+        let startTime: number | null = null
+        
+        // Тайминги в миллисекундах
+        const initialDelay = delay * 1000
+        const assembleDuration = duration * 1000
+        const pauseDuration = 1000
+        const resetPauseDuration = 1000
+        const cycleDuration = assembleDuration + pauseDuration + resetPauseDuration
+        const sectorTime = assembleDuration / totalSectors
+
+        const animate = (timestamp: number) => {
+            if (!startTime) startTime = timestamp
+
+            const elapsed = timestamp - startTime - initialDelay
+
+            // Фаза начальной задержки
+            if (elapsed < 0) {
+                setCurrentSector(0)
+                setSectorProgress(0)
+                animationFrame = requestAnimationFrame(animate)
+                return
+            }
+
+            // Расчет текущей фазы внутри полного цикла
+            const cycleTime = elapsed % cycleDuration
+
+            if (cycleTime < assembleDuration) {
+                // Фаза сборки (отрисовки секторов)
+                const currentSectorIndex = Math.min(
+                    Math.floor(cycleTime / sectorTime),
+                    totalSectors - 1
+                )
+                const sectorElapsed = cycleTime - currentSectorIndex * sectorTime
+                const progress = Math.min(sectorElapsed / sectorTime, 1)
+
+                setCurrentSector(currentSectorIndex)
+                setSectorProgress(progress)
+            } else if (cycleTime < assembleDuration + pauseDuration) {
+                // Фаза паузы (полностью собранный круг)
+                setCurrentSector(totalSectors - 1)
+                setSectorProgress(1)
+            } else {
+                // Фаза сброса (подготовка к следующему циклу)
+                setCurrentSector(0)
+                setSectorProgress(0)
+            }
+
+            animationFrame = requestAnimationFrame(animate)
+        }
+
+        animationFrame = requestAnimationFrame(animate)
+
+        // Очистка цикла анимации при размонтировании или изменении зависимостей
+        return () => {
+            if (animationFrame) cancelAnimationFrame(animationFrame)
+        }
+    }, [isAnimating, duration, delay])
+
+    return (
+        <>
+            {/* Инкапсулированные стили для компонента с адаптивностью */}
+            <style>{`
+                .circular-reveal-container {
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                    width: 100%;
+                    height: 100%;
+                    min-height: 200px;
+                }
+
+                .circular-reveal {
+                    display: inline-block;
+                    line-height: 0;
+                    width: 100%;
+                    max-width: 300px;
+                    aspect-ratio: 1 / 1;
+                }
+                
+                .circular-reveal svg {
+                    width: 100%;
+                    height: 100%;
+                    overflow: visible;
+                }
+                
+                .sector-path {
+                    fill: none;
+                    stroke-linecap: butt;
+                }
+
+                /* Адаптивность под разные размеры экранов */
+                @media (max-width: 1200px) {
+                    .circular-reveal { max-width: 240px; }
+                }
+                @media (max-width: 800px) {
+                    .circular-reveal { max-width: 180px; }
+                }
+                @media (max-width: 400px) {
+                    .circular-reveal { max-width: 140px; }
+                    .circular-reveal-container { min-height: 150px; }
+                }
+            `}</style>
+
+            <div className="circular-reveal-container" ref={containerRef}>
+                <div className="circular-reveal">
+                    <svg viewBox="0 0 200 200" preserveAspectRatio="xMidYMid meet">
+                        {Array.from({ length: totalSectors }).map((_, index) => {
+                            const startAngle = index * anglePerSector
+                            const endAngle = (index + 1) * anglePerSector
+                            const radius = (200 - strokeWidth) / 2
+                            const center = 100
+                            const arcLength = (2 * Math.PI * radius) / totalSectors
+
+                            // Логика определения состояния отрисовки конкретного сегмента
+                            let opacity = 0
+                            let strokeDashoffset = arcLength
+
+                            if (index < currentSector) {
+                                // Сегмент уже полностью отрисован
+                                opacity = 1
+                                strokeDashoffset = 0
+                            } else if (index === currentSector) {
+                                // Сегмент отрисовывается в данный момент
+                                opacity = 1
+                                strokeDashoffset = arcLength * (1 - sectorProgress)
+                            }
+                            // Если index > currentSector, остаются начальные значения (opacity: 0, offset: arcLength)
+
+                            return (
+                                <path
+                                    key={index}
+                                    d={createArcPath(startAngle, endAngle, radius, center, center)}
+                                    className="sector-path"
+                                    stroke={color}
+                                    strokeWidth={strokeWidth}
+                                    strokeDasharray={arcLength}
+                                    strokeDashoffset={strokeDashoffset}
+                                    opacity={opacity}
+                                    style={{ transition: "opacity 0.1s ease" }}
+                                />
+                            )
+                        })}
+                    </svg>
+                </div>
+            </div>
+        </>
+    )
+}
+
+// Регистрация компонента в панели свойств Framer для удобной настройки без кода
+addPropertyControls(CircularReveal, {
+    color: {
+        type: ControlType.Color,
+        defaultValue: "#0A0A0A",
+        title: "Color",
+    },
+    strokeWidth: {
+        type: ControlType.Number,
+        defaultValue: 20,
+        min: 2,
+        max: 50,
+        title: "Stroke Width (px)",
+    },
+    duration: {
+        type: ControlType.Number,
+        defaultValue: 1.5,
+        min: 0.5,
+        max: 3,
+        step: 0.1,
+        title: "Duration (sec)",
+    },
+    delay: {
+        type: ControlType.Number,
+        defaultValue: 0.5,
+        min: 0,
+        max: 3,
+        step: 0.1,
+        title: "Initial Delay (sec)",
+    },
+})
