@@ -1,0 +1,267 @@
+import * as React from "react"
+import { addPropertyControls, ControlType } from "framer"
+
+export function CustomScrollbar(props) {
+    const { lineColor, trackColor, lineWidth } = props
+    const trackRef = React.useRef<HTMLDivElement>(null)
+    const progressRef = React.useRef<HTMLDivElement>(null)
+    const [isVisible, setIsVisible] = React.useState(false)
+    const [isDragging, setIsDragging] = React.useState(false)
+    const dragStartY = React.useRef(0)
+    const dragStartScroll = React.useRef(0)
+    const animationRef = React.useRef<number>()
+
+    // Показ/скрытие скроллбара
+    React.useEffect(() => {
+        const homeSection = document.querySelector("#home")
+
+        const checkVisibility = () => {
+            if (!homeSection) {
+                setIsVisible(true)
+                return
+            }
+            const homeBottom = homeSection.offsetTop + homeSection.offsetHeight
+            setIsVisible(window.scrollY > homeBottom - 100)
+        }
+
+        checkVisibility()
+        window.addEventListener("scroll", checkVisibility, { passive: true })
+        return () => window.removeEventListener("scroll", checkVisibility)
+    }, [])
+
+    // Анимация прогресса
+    React.useEffect(() => {
+        let currentScroll = 0
+        const ease = 0.1
+
+        const animate = () => {
+            if (!isDragging && progressRef.current) {
+                const scrollTop = window.scrollY
+                const docHeight =
+                    document.documentElement.scrollHeight - window.innerHeight
+                const targetScroll = scrollTop / docHeight
+
+                currentScroll += (targetScroll - currentScroll) * ease
+                progressRef.current.style.transform = `scaleY(${currentScroll})`
+            }
+
+            animationRef.current = requestAnimationFrame(animate)
+        }
+
+        animationRef.current = requestAnimationFrame(animate)
+        return () => {
+            if (animationRef.current) cancelAnimationFrame(animationRef.current)
+        }
+    }, [isDragging])
+
+    // Обновление прогресса при скролле
+    const updateProgress = React.useCallback(() => {
+        if (progressRef.current && !isDragging) {
+            const scrollTop = window.scrollY
+            const docHeight =
+                document.documentElement.scrollHeight - window.innerHeight
+            const scrollPercent = scrollTop / docHeight
+            progressRef.current.style.transform = `scaleY(${scrollPercent})`
+        }
+    }, [isDragging])
+
+    // Клик по треку
+    const handleTrackClick = React.useCallback(
+        (e: React.MouseEvent) => {
+            if (isDragging || !trackRef.current) return
+
+            const rect = trackRef.current.getBoundingClientRect()
+            const clickPosition = (e.clientY - rect.top) / rect.height
+            const docHeight =
+                document.documentElement.scrollHeight - window.innerHeight
+
+            window.scrollTo({
+                top: clickPosition * docHeight,
+                behavior: "smooth",
+            })
+        },
+        [isDragging]
+    )
+
+    // Drag логика (объединена для мыши и тача)
+    const startDrag = React.useCallback((clientY: number) => {
+        setIsDragging(true)
+        dragStartY.current = clientY
+        dragStartScroll.current = window.scrollY
+    }, [])
+
+    const moveDrag = React.useCallback((clientY: number) => {
+        if (!trackRef.current) return
+
+        const rect = trackRef.current.getBoundingClientRect()
+        const deltaY = clientY - dragStartY.current
+        const trackHeight = rect.height
+        const docHeight =
+            document.documentElement.scrollHeight - window.innerHeight
+        const scrollDelta = (deltaY / trackHeight) * docHeight
+        const newScroll = dragStartScroll.current + scrollDelta
+
+        window.scrollTo(0, newScroll)
+
+        if (progressRef.current) {
+            const scrollPercent = newScroll / docHeight
+            progressRef.current.style.transform = `scaleY(${scrollPercent})`
+        }
+    }, [])
+
+    const endDrag = React.useCallback(() => {
+        setIsDragging(false)
+    }, [])
+
+    // Mouse events
+    const handleMouseDown = React.useCallback(
+        (e: React.MouseEvent) => {
+            e.preventDefault()
+            startDrag(e.clientY)
+        },
+        [startDrag]
+    )
+
+    React.useEffect(() => {
+        if (!isDragging) return
+
+        const handleMouseMove = (e: MouseEvent) => moveDrag(e.clientY)
+        const handleMouseUp = () => endDrag()
+
+        window.addEventListener("mousemove", handleMouseMove)
+        window.addEventListener("mouseup", handleMouseUp)
+
+        return () => {
+            window.removeEventListener("mousemove", handleMouseMove)
+            window.removeEventListener("mouseup", handleMouseUp)
+        }
+    }, [isDragging, moveDrag, endDrag])
+
+    // Touch events
+    const handleTouchStart = React.useCallback(
+        (e: React.TouchEvent) => {
+            startDrag(e.touches[0].clientY)
+        },
+        [startDrag]
+    )
+
+    React.useEffect(() => {
+        if (!isDragging) return
+
+        const handleTouchMove = (e: TouchEvent) => {
+            e.preventDefault()
+            moveDrag(e.touches[0].clientY)
+        }
+        const handleTouchEnd = () => endDrag()
+
+        window.addEventListener("touchmove", handleTouchMove, {
+            passive: false,
+        })
+        window.addEventListener("touchend", handleTouchEnd)
+
+        return () => {
+            window.removeEventListener("touchmove", handleTouchMove)
+            window.removeEventListener("touchend", handleTouchEnd)
+        }
+    }, [isDragging, moveDrag, endDrag])
+
+    return (
+        <>
+            <style>{`
+                .custom-scrollbar-wrapper {
+                    position: fixed;
+                    right: 10px;
+                    top: 50%;
+                    transform: translateY(-50%);
+                    width: 24px;
+                    height: 60vh;
+                    z-index: 9999;
+                    cursor: pointer;
+                    opacity: 0;
+                    transition: opacity 0.4s ease;
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                }
+
+                .custom-scrollbar-wrapper.visible {
+                    opacity: 1;
+                }
+
+                .custom-scrollbar-track {
+                    width: ${lineWidth}px;
+                    height: 100%;
+                    background-color: ${trackColor || "rgba(10, 10, 10, 0.1)"};
+                    position: relative;
+                    transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+                    transform-origin: center;
+                }
+
+                .custom-scrollbar-wrapper:hover .custom-scrollbar-track {
+                    transform: scaleX(2.5);
+                }
+
+                .custom-scrollbar-progress {
+                    width: 100%;
+                    height: 100%;
+                    background-color: ${lineColor || "#0A0A0A"};
+                    transform-origin: top;
+                    transform: scaleY(0);
+                    will-change: transform;
+                    position: relative;
+                    pointer-events: none;
+                }
+
+                /* Планшет (810px — 1600px) */
+                @media (max-width: 1600px) {
+                    .custom-scrollbar-wrapper {
+                        right: 5px;
+                    }
+                }
+
+                /* Мобильные (<809px) */
+                @media (max-width: 809px) {
+                    .custom-scrollbar-wrapper {
+                        right: 0px;
+                        width: 25px;
+                    }
+                }
+            `}</style>
+
+            <div
+                ref={trackRef}
+                className={`custom-scrollbar-wrapper ${isVisible ? "visible" : ""}`}
+                onClick={handleTrackClick}
+                onMouseDown={handleMouseDown}
+                onTouchStart={handleTouchStart}
+            >
+                <div className="custom-scrollbar-track">
+                    <div
+                        ref={progressRef}
+                        className="custom-scrollbar-progress"
+                    />
+                </div>
+            </div>
+        </>
+    )
+}
+
+addPropertyControls(CustomScrollbar, {
+    lineColor: {
+        type: ControlType.Color,
+        defaultValue: "#0A0A0A",
+        title: "Line Color",
+    },
+    trackColor: {
+        type: ControlType.Color,
+        defaultValue: "rgba(10, 10, 10, 0.1)",
+        title: "Track Color",
+    },
+    lineWidth: {
+        type: ControlType.Number,
+        defaultValue: 2,
+        min: 1,
+        max: 6,
+        title: "Width (px)",
+    },
+})
