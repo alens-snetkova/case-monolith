@@ -1,0 +1,119 @@
+import * as React from "react"
+
+/**
+ * Hint_white
+ * Компонент подсказки "SCROLL", который плавно появляется, когда секция 
+ * попадает в область видимости, и исчезает через 3 секунды, чтобы не отвлекать пользователя.
+ */
+export default function Hint_white() {
+    const [isVisible, setIsVisible] = React.useState(false)
+    
+    // Флаг, чтобы анимация сработала только один раз за "визит" в зону видимости, 
+    // а не перезапускалась каждые 3 секунды, пока пользователь смотрит на экран.
+    const [hasAnimated, setHasAnimated] = React.useState(false)
+    
+    const containerRef = React.useRef<HTMLDivElement>(null)
+
+    // Храним ID таймера в ref, а не в стейте. 
+    // Это позволяет не вызывать лишний ререндер компонента и дает нам прямой доступ 
+    // к таймеру для его очистки, когда компонент удаляется со страницы.
+    const timerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null)
+
+    React.useEffect(() => {
+        if (!containerRef.current) return
+
+        // Следим за появлением элемента на экране (порог 50%)
+        const observer = new IntersectionObserver(
+            ([entry]) => {
+                if (entry.isIntersecting && !hasAnimated) {
+                    // 1. Показываем подсказку
+                    setIsVisible(true)
+
+                    // 2. Через 3 секунды прячем её и ставим метку, что анимация уже была
+                    timerRef.current = setTimeout(() => {
+                        setIsVisible(false)
+                        setHasAnimated(true)
+                    }, 3000)
+                } else if (!entry.isIntersecting && hasAnimated) {
+                    /* 3. Умный UX: если пользователь ускроллил дальше, а потом вернулся назад, 
+                    мы сбрасываем флаг. Это позволяет подсказке появиться снова, 
+                    если она действительно нужна, вместо того чтобы исчезнуть навсегда.*/ 
+                    setHasAnimated(false)
+                }
+            },
+            { threshold: 0.5 }
+        )
+
+        observer.observe(containerRef.current)
+
+        /*Функция очистки (Cleanup). 
+         Критически важна: если пользователь уйдет со страницы до того, 
+         как сработает таймер, clearTimeout спасет нас от ошибки 
+         "Can't perform a React state update on an unmounted component".*/
+        return () => {
+            if (timerRef.current) clearTimeout(timerRef.current)
+            observer.disconnect()
+        }
+    }, [hasAnimated])
+
+    return (
+        <>
+            <style>{`
+                .scroll-hint-white {
+                    position: absolute;
+                    top: 40px;
+                    left: 50%;
+                    transform: translateX(-50%);
+                    z-index: 100;
+                    display: flex;
+                    flex-direction: row;
+                    align-items: center;
+                    gap: 4px;
+                    opacity: 0;
+                    transition: opacity 0.3s ease;
+                    
+                    /* Важно: подсказка не должна перехватывать клики мышкой, 
+                       иначе пользователь не сможет нажать на элементы, находящиеся под ней */
+                    pointer-events: none;
+                    
+                    /* Подсказка браузеру: этот элемент будет анимироваться. 
+                       Браузер вынесет его в отдельный слой (GPU), чтобы анимация была плавной */
+                    will-change: opacity;
+                }
+
+                .scroll-hint-white.visible {
+                    opacity: 1;
+                }
+
+                .scroll-hint-white-text {
+                    font-family: 'Inter', sans-serif;
+                    font-weight: 200;
+                    font-size: 11px;
+                    letter-spacing: 0.15em;
+                    color: #ffffff;
+                    text-transform: uppercase;
+                }
+
+                .scroll-hint-white svg {
+                    width: 14px;
+                    height: 14px;
+                    stroke: #ffffff;
+                    stroke-width: 1.5;
+                    fill: none;
+                    stroke-linecap: round;
+                    stroke-linejoin: round;
+                }
+            `}</style>
+
+            <div
+                ref={containerRef}
+                className={`scroll-hint-white ${isVisible ? "visible" : ""}`}
+            >
+                <span className="scroll-hint-white-text">SCROLL</span>
+                <svg viewBox="0 0 24 24">
+                    <path d="M12 5V19M5 12l7 7 7-7" />
+                </svg>
+            </div>
+        </>
+    )
+}
