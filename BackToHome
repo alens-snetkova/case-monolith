@@ -1,0 +1,111 @@
+import * as React from "react"
+import { addPropertyControls, ControlType } from "framer"
+
+/**
+ * BackToHome
+ * Фиксированная кнопка "Назад на главную" с продуманной UX-логикой.
+ * Использует семантический тег <a> для правильной навигации и доступности.
+ */
+export default function BackToHome(props: { color: string }) {
+    const { color } = props
+
+    return (
+        <>
+            <style>{`
+                .home-arrow {
+                    position: fixed;
+                    top: 20px;
+                    left: 20px;
+                    width: 48px;
+                    height: 48px;
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                    z-index: 100;
+                    opacity: 0.5;
+                    /* Анимируем только opacity и transform — это самые дешевые для браузера свойства, 
+                       они не вызывают перерисовку (reflow) макета страницы */
+                    transition: opacity 0.3s ease, transform 0.3s ease;
+                    cursor: pointer;
+                    text-decoration: none;
+                    
+                    /* ГЛАВНАЯ UX-ФИШКА: 
+                       Мы увеличиваем кликабельную зону (hit area) до 48px (рекомендация Apple/Google >= 44px),
+                       но используем отрицательный margin, чтобы визуально кнопка оставалась компактной (48px - 16px = 32px),
+                       не сдвигая при этом соседние элементы макета. */
+                    padding: 8px;
+                    margin: -8px; 
+                }
+
+                .home-arrow:hover {
+                    opacity: 1; /* Плавное появление при наведении дает понятный фидбек пользователю */
+                }
+
+                .home-arrow svg {
+                    width: 24px;
+                    height: 24px;
+                    stroke: ${color};
+                    stroke-width: 2;
+                    fill: none;
+                    stroke-linecap: round;
+                    stroke-linejoin: round;
+                    transition: stroke 0.3s ease;
+                }
+
+                /* Адаптивность: уменьшаем размер на планшетах, чтобы не перекрывать контент */
+                @media (max-width: 1600px) {
+                    .home-arrow {
+                        top: 15px;
+                        left: 15px;
+                        width: 40px;
+                        height: 40px;
+                    }
+                    .home-arrow svg {
+                        width: 20px;
+                        height: 20px;
+                    }
+                }
+
+                /* Адаптивность: на мобильных устройствах кнопка максимально компактна, но зона клика остается удобной */
+                @media (max-width: 809px) {
+                    .home-arrow {
+                        top: 10px;
+                        left: 10px;
+                        width: 36px;
+                        height: 36px;
+                    }
+                    .home-arrow svg {
+                        width: 18px;
+                        height: 18px;
+                    }
+                }
+            `}</style>
+
+            {/* 
+              Семантически верный подход: используем <a> вместо <div> с onClick. 
+              Это дает нам "бесплатную" доступность (работает с клавиатуры через Tab/Enter), 
+              правильный контекст для скринридеров и корректную работу с историей браузера.
+            */}
+            <a
+                href="https://ennyx.framer.website"
+                className="home-arrow"
+                aria-label="Вернуться на главную страницу портфолио"
+            >
+                <svg viewBox="0 0 24 24">
+                    {/* Оптимизированный путь стрелки: минимум точек, чистая геометрия */}
+                    <path d="M18 12L6 12M10 6L6 12L10 18" />
+                </svg>
+            </a>
+        </>
+    )
+}
+
+// Интеграция с Framer: позволяем дизайнеру (или себе в будущем) менять цвет стрелки 
+// прямо в панели свойств, не залезая в код. Это мост между дизайном и разработкой.
+addPropertyControls(BackToHome, {
+    color: {
+        type: ControlType.Color,
+        defaultValue: "#000000",
+        title: "Arrow Color",
+    },
+})
