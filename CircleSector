@@ -1,0 +1,267 @@
+import * as React from "react"
+
+// вынос констант
+const TOTAL_SECTORS = 6
+const ANGLE_PER_SECTOR = 360 / TOTAL_SECTORS
+const ASSEMBLE_DURATION = 1500
+const DISASSEMBLE_DURATION = 1500
+const PAUSE_DURATION = 500
+const CYCLE_DURATION =
+    ASSEMBLE_DURATION + PAUSE_DURATION + DISASSEMBLE_DURATION + PAUSE_DURATION
+const SECTOR_TIME = ASSEMBLE_DURATION / TOTAL_SECTORS
+const DISASSEMBLE_SECTOR_TIME = DISASSEMBLE_DURATION / TOTAL_SECTORS
+
+// функция
+const createArcPath = (
+    startAngle: number,
+    endAngle: number,
+    r: number,
+    cx: number,
+    cy: number
+) => {
+    const startRad = ((startAngle - 90) * Math.PI) / 180
+    const endRad = ((endAngle - 90) * Math.PI) / 180
+    const x1 = cx + r * Math.cos(startRad)
+    const y1 = cy + r * Math.sin(startRad)
+    const x2 = cx + r * Math.cos(endRad)
+    const y2 = cy + r * Math.sin(endRad)
+    const largeArcFlag = ANGLE_PER_SECTOR > 180 ? 1 : 0
+    return `M ${x1} ${y1} A ${r} ${r} 0 ${largeArcFlag} 1 ${x2} ${y2}`
+}
+
+export default function CircularRevealAdaptive() {
+    const containerRef = React.useRef<HTMLDivElement>(null)
+    const [containerSize, setContainerSize] = React.useState(300)
+
+    React.useEffect(() => {
+        if (!containerRef.current) return
+
+        // Инициализируем начальное значение
+        const initialWidth = containerRef.current.offsetWidth
+        if (initialWidth > 0) setContainerSize(initialWidth)
+
+        // обновляем стейт только если размер реально изменился
+        const observer = new ResizeObserver((entries) => {
+            for (const entry of entries) {
+                const width = Math.round(entry.contentRect.width)
+                if (width > 0 && width !== containerSize) {
+                    setContainerSize(width)
+                }
+            }
+        })
+
+        observer.observe(containerRef.current)
+        return () => observer.disconnect()
+    }, [containerSize])
+
+    return (
+        <div
+            ref={containerRef}
+            style={{
+                position: "relative",
+                width: "100%",
+                height: "100%",
+                minHeight: "200px",
+            }}
+        >
+            <CircularRevealAnimation
+                color="#0A0A0A"
+                containerWidth={containerSize}
+            />
+        </div>
+    )
+}
+
+function CircularRevealAnimation({
+    color,
+    containerWidth,
+}: {
+    color: string
+    containerWidth: number
+}) {
+    const size = Math.min(Math.max(containerWidth * 0.6, 120), 400)
+    const strokeWidth = size * 0.1
+    const radius = (size - strokeWidth) / 2
+    const center = size / 2
+
+    const sectorRefs = React.useRef<(SVGGElement | null)[]>([])
+    const directionsRef = React.useRef<{ x: number; y: number }[]>([])
+    const animationRef = React.useRef<number>()
+    const isVisibleRef = React.useRef(true)
+    const wrapperRef = React.useRef<HTMLDivElement>(null)
+
+    // useMemo: зависимость только от размера
+    React.useEffect(() => {
+        directionsRef.current = Array.from(
+            { length: TOTAL_SECTORS },
+            (_, i) => {
+                const angle = (i * ANGLE_PER_SECTOR - 90) * (Math.PI / 180)
+                const distance = size * 0.8
+                return {
+                    x: Math.cos(angle) * distance,
+                    y: Math.sin(angle) * distance,
+                }
+            }
+        )
+    }, [size])
+
+    // 5. Intersection Observer: корректная очистка через disconnect()
+    React.useEffect(() => {
+        if (!wrapperRef.current) return
+
+        const observer = new IntersectionObserver(
+            ([entry]) => {
+                isVisibleRef.current = entry.isIntersecting
+            },
+            { threshold: 0.1 }
+        )
+
+        observer.observe(wrapperRef.current)
+        return () => observer.disconnect()
+    }, [])
+
+    // анимация
+    React.useEffect(() => {
+        let startTime: number | null = null
+
+        const animate = (timestamp: number) => {
+            // Если элемент не виден, просто запрашиваем следующий кадр
+            
+            if (!isVisibleRef.current) {
+                animationRef.current = requestAnimationFrame(animate)
+                return
+            }
+
+            if (!startTime) startTime = timestamp
+
+            const elapsed = timestamp - startTime
+            const cycleTime = elapsed % CYCLE_DURATION
+
+            const sectors = sectorRefs.current
+            const directions = directionsRef.current
+
+            for (let i = 0; i < TOTAL_SECTORS; i++) {
+                const el = sectors[i]
+                if (!el) continue
+
+                const direction = directions[i]
+                let opacity = 0
+                let translateX = direction.x
+                let translateY = direction.y
+
+                if (cycleTime < ASSEMBLE_DURATION) {
+                    const sectorStart = i * SECTOR_TIME
+                    const sectorEnd = sectorStart + SECTOR_TIME
+
+                    if (cycleTime >= sectorEnd) {
+                        opacity = 1
+                        translateX = 0
+                        translateY = 0
+                    } else if (cycleTime >= sectorStart) {
+                        const progress = (cycleTime - sectorStart) / SECTOR_TIME
+                        opacity = progress
+                        translateX = direction.x * (1 - progress)
+                        translateY = direction.y * (1 - progress)
+                    }
+                } else if (cycleTime < ASSEMBLE_DURATION + PAUSE_DURATION) {
+                    opacity = 1
+                    translateX = 0
+                    translateY = 0
+                } else if (
+                    cycleTime <
+                    ASSEMBLE_DURATION + PAUSE_DURATION + DISASSEMBLE_DURATION
+                ) {
+                    const disassembleTime =
+                        cycleTime - ASSEMBLE_DURATION - PAUSE_DURATION
+                    const reverseIndex = TOTAL_SECTORS - 1 - i
+                    const sectorStart = reverseIndex * DISASSEMBLE_SECTOR_TIME
+                    const sectorEnd = sectorStart + DISASSEMBLE_SECTOR_TIME
+
+                    if (disassembleTime >= sectorEnd) {
+                        opacity = 0
+                        translateX = direction.x
+                        translateY = direction.y
+                    } else if (disassembleTime >= sectorStart) {
+                        const progress =
+                            (disassembleTime - sectorStart) /
+                            DISASSEMBLE_SECTOR_TIME
+                        opacity = 1 - progress
+                        translateX = direction.x * progress
+                        translateY = direction.y * progress
+                    } else {
+                        opacity = 1
+                        translateX = 0
+                        translateY = 0
+                    }
+                }
+
+                // Прямая манипуляция DOM
+                el.style.opacity = String(opacity)
+                el.style.transform = `translate(${translateX}px, ${translateY}px)`
+            }
+
+            animationRef.current = requestAnimationFrame(animate)
+        }
+
+        animationRef.current = requestAnimationFrame(animate)
+
+        return () => {
+            if (animationRef.current) {
+                cancelAnimationFrame(animationRef.current)
+            }
+        }
+    }, []) 
+
+    return (
+        <div
+            ref={wrapperRef}
+            style={{
+                position: "absolute",
+                top: "50%",
+                left: "50%",
+                transform: "translate(-50%, -50%)",
+                width: `${size}px`,
+                height: `${size}px`,
+            }}
+        >
+            <svg
+                width={size}
+                height={size}
+                viewBox={`0 0 ${size} ${size}`}
+                style={{ overflow: "visible" }}
+            >
+                {Array.from({ length: TOTAL_SECTORS }).map((_, index) => {
+                    const startAngle = index * ANGLE_PER_SECTOR
+                    const endAngle = (index + 1) * ANGLE_PER_SECTOR
+
+                    return (
+                        <g
+                            key={index}
+                            ref={(el) => {
+                                sectorRefs.current[index] = el
+                            }}
+                            style={{
+                                opacity: 0,
+                                willChange: "transform, opacity",
+                            }}
+                        >
+                            <path
+                                d={createArcPath(
+                                    startAngle,
+                                    endAngle,
+                                    radius,
+                                    center,
+                                    center
+                                )}
+                                fill="none"
+                                stroke={color}
+                                strokeWidth={strokeWidth}
+                                strokeLinecap="butt"
+                            />
+                        </g>
+                    )
+                })}
+            </svg>
+        </div>
+    )
+}
