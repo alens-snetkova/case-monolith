@@ -1,20 +1,30 @@
 import * as React from "react"
 
+/**
+ * CheckIconAdaptive
+ * Адаптивный компонент иконки "галочка" с поэтапной SVG-анимацией отрисовки.
+ * Анимация автоматически запускается при появлении компонента в области видимости (scroll trigger).
+ * Размер иконки динамически подстраивается под ширину родительского контейнера.
+ */
 export default function CheckIconAdaptive() {
     const containerRef = React.useRef<HTMLDivElement>(null)
+    
+    // Хранит актуальную ширину контейнера для масштабирования SVG (fallback: 32px)
     const [containerSize, setContainerSize] = React.useState(32)
+    // Флаг-триггер для запуска CSS-анимации
     const [isVisible, setIsVisible] = React.useState(false)
 
-  
+    // 1. Отслеживание изменения размеров контейнера (Responsive sizing)
     React.useEffect(() => {
         if (!containerRef.current) return
 
-        // Начальное измерение
+        // Начальное измерение при маунте
         setContainerSize(Math.round(containerRef.current.offsetWidth) || 32)
 
         const observer = new ResizeObserver((entries) => {
             for (const entry of entries) {
-                // Math.round предотвращает лишние ререндеры из-за дробных пикселей
+                // ВАЖНО: Math.round предотвращает бесконечные циклы перерендеров (re-render loops), 
+                // которые возникают из-за дробных значений пикселей (sub-pixel rendering) в некоторых браузерах.
                 const width = Math.round(entry.contentRect.width)
                 if (width > 0) {
                     setContainerSize((prev) => (width !== prev ? width : prev))
@@ -23,10 +33,12 @@ export default function CheckIconAdaptive() {
         })
 
         observer.observe(containerRef.current)
+        
+        // Очистка observer при размонтировании (предотвращение утечек памяти)
         return () => observer.disconnect()
     }, [])
 
-    // таймер
+    // 2. Отслеживание появления в viewport для запуска анимации (Scroll Trigger)
     React.useEffect(() => {
         if (!containerRef.current) return
 
@@ -36,16 +48,20 @@ export default function CheckIconAdaptive() {
             (entries) => {
                 const entry = entries[0]
                 if (entry.isIntersecting) {
+                    // Небольшая задержка перед запуском для создания эффекта "ожидания" при скролле
                     timer = setTimeout(() => setIsVisible(true), 500)
                 } else {
+                    // Сброс состояния при уходе из viewport (для возможности повторной анимации)
                     clearTimeout(timer)
                     setIsVisible(false)
                 }
             },
-            { threshold: 0.5 }
+            { threshold: 0.5 } // Срабатывает, когда 50% элемента видно на экране
         )
 
         observer.observe(containerRef.current)
+        
+        // Тщательная очистка: сброс таймера и отключение observer
         return () => {
             clearTimeout(timer)
             observer.disconnect()
@@ -59,15 +75,21 @@ export default function CheckIconAdaptive() {
                 position: "relative",
                 width: "100%",
                 height: "100%",
-                minHeight: "24px",
+                minHeight: "24px", // Минимальный размер для корректного отображения
             }}
         >
+            {/* Передача вычисленного размера и триггера в чистый компонент анимации */}
             <CheckIconAnimation size={containerSize} isVisible={isVisible} />
         </div>
     )
 }
 
-// фиксированный viewBox
+/**
+ * CheckIconAnimation
+ * Чистый компонент отрисовки SVG. 
+ * Использует фиксированный viewBox="0 0 100 100", чтобы браузер сам масштабировал графику через CSS.
+ * Это избавляет React от дорогостоящих пересчетов координат SVG при каждом изменении размера окна.
+ */
 function CheckIconAnimation({
     size,
     isVisible,
@@ -75,14 +97,23 @@ function CheckIconAnimation({
     size: number
     isVisible: boolean
 }) {
-    // Используем viewBox="0 0 100 100". Это избавляет от пересчета координат при каждом изменении размера.
-    // Браузер сам масштабирует SVG
+    // Радиус круга (40% от viewBox 100x100, оставляя отступы для stroke)
     const radius = 40
+    // Длина окружности для техники анимации "рисования линии" (stroke-dasharray)
     const circumference = 2 * Math.PI * radius // ~251.33
-    const checkLength = 45 // Точная длина пути M 35 50 L 45 60 L 65 40 (~42.4) + запас для round caps
+    
+    // Длина пути галочки (M 35 50 -> 45 60 -> 65 40). 
+    // Геометрическая длина ~42.4px. Значение 45 взято с небольшим запасом, 
+    // чтобы полностью скрыть/отобразить линию с учетом strokeLinecap="round".
+    const checkLength = 45 
 
     return (
         <>
+            {/* 
+             * Инкапсулированные CSS-переходы.
+             * Задержки (delay) в transition создают последовательную анимацию: 
+             * сначала рисуется круг (0.6s), затем с задержкой 0.6s появляется и рисуется галочка.
+             */}
             <style>{`
                 .check-circle {
                     transition: stroke-dashoffset 0.6s ease, fill 0.3s ease 0.4s;
@@ -95,6 +126,7 @@ function CheckIconAnimation({
                 }
             `}</style>
 
+            {/* Абсолютное центрирование SVG внутри родительского контейнера */}
             <div
                 style={{
                     position: "absolute",
@@ -110,28 +142,36 @@ function CheckIconAnimation({
                     style={{
                         width: "100%",
                         height: "100%",
-                        overflow: "visible",
+                        overflow: "visible", // Позволяет round caps выходить за границы viewBox без обрезки
                     }}
                 >
-                    {/* Круг */}
+                    {/* 
+                     * Анимация круга: 
+                     * strokeDashoffset меняется от circumference (линия полностью скрыта) 
+                     * до 0 (линия полностью нарисована).
+                     */}
                     <circle
                         cx="50"
                         cy="50"
                         r={radius}
                         fill={isVisible ? "#0A0A0A" : "transparent"}
                         stroke="#0A0A0A"
-                        strokeWidth="10" /* 10% от 100 */
+                        strokeWidth="10" /* 10% от размера viewBox (100) */
                         strokeDasharray={circumference}
                         strokeDashoffset={isVisible ? 0 : circumference}
                         className="check-circle"
                     />
 
-                    {/* Галочка */}
+                    {/* 
+                     * Анимация галочки:
+                     * Аналогичный принцип с strokeDashoffset + дополнительный эффект масштабирования (scale) 
+                     * и прозрачности (opacity) для создания эффекта "пружинистого" появления (pop-up).
+                     */}
                     <path
                         d="M 35 50 L 45 60 L 65 40"
                         fill="none"
                         stroke="#FFFFFF"
-                        strokeWidth="8" /* 8% от 100 */
+                        strokeWidth="8" /* 8% от размера viewBox (100) */
                         strokeLinecap="round"
                         strokeLinejoin="round"
                         strokeDasharray={checkLength}
